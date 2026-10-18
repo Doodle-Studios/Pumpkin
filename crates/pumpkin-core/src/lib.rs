@@ -276,7 +276,12 @@ impl PumpkinServer {
             });
         }
 
-        let tcp_listener = if server.advanced_config.networking.java.enabled {
+        // Limonite seam: without the `java-listener` feature, no Java TCP socket, query or LAN
+        // broadcast is ever started, whatever the config says. `cfg!` (not `#[cfg]`) keeps this
+        // branch type-checked; the optimizer removes it.
+        let tcp_listener = if cfg!(feature = "java-listener")
+            && server.advanced_config.networking.java.enabled
+        {
             let address = server.advanced_config.networking.java.address;
             // Setup the TCP server socket.
             let listener = match TcpListener::bind(address).await {

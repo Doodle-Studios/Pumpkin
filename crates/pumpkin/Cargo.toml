@@ -27,6 +27,9 @@ tracing.workspace = true
 console-subscriber = { workspace = true, optional = true }
 
 [features]
+default = ["java-listener"]
+# Accept Java Edition connections. Build with `--no-default-features` for a Bedrock-only server.
+java-listener = ["pumpkin-core/java-listener"]
 console-subscriber = ["dep:console-subscriber"]
 # Load plugins built against the v0.2 API. Off until the v0.2 ABI is finished.
 plugin-v0_2 = ["pumpkin-wasm-host/v0_2"]

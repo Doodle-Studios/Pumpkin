@@ -119,5 +119,12 @@ xxhash-rust.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 
+[features]
+# Limonite seam: lets the server bind the Java Edition listener (TCP, query, LAN broadcast) when
+# `networking.java.enabled` is set. Opt-in, because every crate depends on this one with
+# `default-features = false`; the `pumpkin` binary turns it on by default. Limonite's embedded
+# server leaves it off, so it can never open a Java socket.
+java-listener = []
+
 [lints]
 workspace = true

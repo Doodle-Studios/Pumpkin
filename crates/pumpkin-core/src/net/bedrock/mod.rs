@@ -2,6 +2,7 @@ pub mod nethernet;
 pub mod play;
 pub(crate) mod recipe;
 pub mod status;
+pub mod transport;
 use crossbeam::atomic::AtomicCell;
 use std::{
     collections::HashMap,
@@ -58,7 +59,7 @@ use tokio_util::{sync::CancellationToken, task::TaskTracker};
 pub mod level_chunk;
 pub mod login;
 use self::level_chunk::CLevelChunk;
-use self::nethernet::NetherNetSession;
+use self::transport::Transport;
 use crate::{
     entity::player::Player,
     net::{
@@ -95,7 +96,7 @@ impl OutgoingPacket {
 }
 
 pub struct BedrockClient {
-    session: Arc<NetherNetSession>,
+    session: Arc<dyn Transport>,
     /// The client's IP address.
     pub address: SocketAddr,
     pub player: ArcSwap<Option<Arc<Player>>>,
@@ -138,7 +139,7 @@ pub struct BedrockClient {
 impl BedrockClient {
     #[must_use]
     pub fn new(
-        session: Arc<NetherNetSession>,
+        session: Arc<dyn Transport>,
         address: SocketAddr,
         be_clients: Arc<Mutex<HashMap<SocketAddr, Arc<Self>>>>,
         packet_limiter: PacketRateLimiter,

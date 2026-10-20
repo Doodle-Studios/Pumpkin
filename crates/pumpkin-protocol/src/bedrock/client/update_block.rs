@@ -3,10 +3,13 @@
 use pumpkin_macros::packet;
 use pumpkin_util::math::position::BlockPos;
 
+#[cfg(feature = "client")]
+use crate::serial::PacketRead;
 use crate::{codec::var_uint::VarUInt, serial::PacketWrite};
 
 /// Updates a single block state client-side without retransmitting the entire chunk.
 #[derive(PacketWrite)]
+#[cfg_attr(feature = "client", derive(PacketRead))]
 #[packet(21)]
 pub struct CUpdateBlock {
     /// World coordinates where the block state is being updated.

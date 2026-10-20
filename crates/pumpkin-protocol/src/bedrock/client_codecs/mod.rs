@@ -28,15 +28,19 @@ mod start_game;
 mod tests {
     use crate::{
         bedrock::{
-            client::{chunk_radius_updated::CChunkRadiusUpdated, play_status::CPlayStatus},
+            client::{
+                chunk_radius_updated::CChunkRadiusUpdated, play_status::CPlayStatus,
+                update_block::CUpdateBlock,
+            },
             server::{
                 request_chunk_radius::SRequestChunkRadius,
                 set_local_player_as_initialized::SSetLocalPlayerAsInitialized,
             },
         },
-        codec::{var_int::VarInt, var_ulong::VarULong},
+        codec::{var_int::VarInt, var_uint::VarUInt, var_ulong::VarULong},
         serial::{PacketRead, PacketWrite},
     };
+    use pumpkin_util::math::{position::BlockPos, vector3::Vector3};
 
     /// Reads `fixture` with Pumpkin's reader, checks every byte was used, and
     /// returns the packet with our writer's bytes.
@@ -89,5 +93,16 @@ mod tests {
             chunk_radius: VarInt(8),
         });
         assert_eq!(read.chunk_radius, VarInt(8));
+    }
+
+    #[test]
+    fn update_block_round_trips() {
+        // Negative x and z, and the water layer: every field away from its default.
+        let position = BlockPos(Vector3::new(-1234, 70, -98_765));
+        let read = round_trip(&CUpdateBlock::with_layer(position, 0x1234_5678, 1));
+        assert_eq!(read.block_position, position);
+        assert_eq!(read.block_runtime_id, VarUInt(0x1234_5678));
+        assert_eq!(read.flags, VarUInt(0x3));
+        assert_eq!(read.layer, VarUInt(1));
     }
 }

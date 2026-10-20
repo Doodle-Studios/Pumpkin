@@ -81,6 +81,10 @@ mod tests {
     use super::*;
     use crate::serial::PacketWrite;
 
+    /// Compares the decoded compound, not the re-encoded bytes: `NbtCompound`
+    /// keeps its tags in a `HashMap`, whose iteration order differs between
+    /// instances, so even Pumpkin's own writer orders the tags differently for
+    /// two equal compounds.
     #[test]
     fn round_trips_a_compound() {
         let mut compound = NbtCompound::new();
@@ -93,9 +97,10 @@ mod tests {
         let mut reader = first.as_slice();
         let read = NbtCompound::read(&mut reader).unwrap();
         assert!(reader.is_empty());
+        assert_eq!(read, compound);
 
         let mut second = Vec::new();
         read.write(&mut second).unwrap();
-        assert_eq!(first, second);
+        assert_eq!(first.len(), second.len());
     }
 }

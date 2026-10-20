@@ -16,6 +16,7 @@ use crate::net::bedrock::{
     BedrockClient,
     nethernet::{NetherNetListener, load_or_create_identity_key},
     status::{IceSocket, StatusResponder},
+    transport::Transport,
 };
 use crate::net::java::JavaClient;
 use crate::net::java::pending::PendingConnection;
@@ -666,35 +667,14 @@ impl PumpkinServer {
             // Branch for Bedrock NetherNet connections negotiated over HTTP/WebRTC.
             nethernet_result = resolve_some(self.nethernet_listener.as_ref(), NetherNetListener::accept) => {
                 if let Some((session, client_addr)) = nethernet_result {
-                    *master_client_id_counter += 1;
-                    let be_clients = bedrock_clients.clone();
-                    let packet_limiter = PacketRateLimiter::from_config(
-                        &self.server.advanced_config.networking.bedrock.packet_limiter,
-                    );
-                    let client = Arc::new(BedrockClient::new(
-                        session.clone(),
+                    self.accept_bedrock(
+                        session,
                         client_addr,
-                        be_clients,
-                        packet_limiter,
-                    ));
-                    client.start_outgoing_packet_task();
-                    bedrock_clients.lock().await.insert(client_addr, client.clone());
-
-                    let packet_client = client.clone();
-                    let packet_server = self.server.clone();
-                    tasks.spawn(async move {
-                        while let Some(packet) = session.recv().await {
-                            packet_client
-                                .process_nethernet_packet(&packet_server, packet)
-                                .await;
-                            if packet_client.is_closed() {
-                                break;
-                            }
-                        }
-                        packet_client.close().await;
-                    });
-
-                    self.spawn_bedrock_client_task(client, tasks);
+                        master_client_id_counter,
+                        tasks,
+                        bedrock_clients,
+                    )
+                    .await;
                 }
             },
 
@@ -704,6 +684,59 @@ impl PumpkinServer {
             }
         }
         true
+    }
+
+    /// Starts serving an accepted Bedrock connection: its outgoing task, its read
+    /// loop and its login task.
+    ///
+    /// Limonite seam: every Bedrock transport hands its connections here, so a
+    /// player joined over `NetherNet` and the host joined over an in-process
+    /// `LocalChannel` go through exactly the same path.
+    async fn accept_bedrock(
+        &self,
+        transport: Arc<dyn Transport>,
+        client_addr: SocketAddr,
+        master_client_id_counter: &mut u64,
+        tasks: &Arc<TaskTracker>,
+        bedrock_clients: &Arc<Mutex<HashMap<SocketAddr, Arc<BedrockClient>>>>,
+    ) {
+        *master_client_id_counter += 1;
+        let be_clients = bedrock_clients.clone();
+        let packet_limiter = PacketRateLimiter::from_config(
+            &self
+                .server
+                .advanced_config
+                .networking
+                .bedrock
+                .packet_limiter,
+        );
+        let client = Arc::new(BedrockClient::new(
+            transport.clone(),
+            client_addr,
+            be_clients,
+            packet_limiter,
+        ));
+        client.start_outgoing_packet_task();
+        bedrock_clients
+            .lock()
+            .await
+            .insert(client_addr, client.clone());
+
+        let packet_client = client.clone();
+        let packet_server = self.server.clone();
+        tasks.spawn(async move {
+            while let Some(packet) = transport.recv().await {
+                packet_client
+                    .process_nethernet_packet(&packet_server, packet)
+                    .await;
+                if packet_client.is_closed() {
+                    break;
+                }
+            }
+            packet_client.close().await;
+        });
+
+        self.spawn_bedrock_client_task(client, tasks);
     }
 
     fn spawn_bedrock_client_task(&self, client: Arc<BedrockClient>, tasks: &Arc<TaskTracker>) {

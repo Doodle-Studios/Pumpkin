@@ -1,3 +1,4 @@
+pub mod local;
 pub mod nethernet;
 pub mod play;
 pub(crate) mod recipe;

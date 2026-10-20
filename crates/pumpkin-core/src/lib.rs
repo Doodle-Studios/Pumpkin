@@ -14,6 +14,7 @@ use crate::logging::{
 };
 use crate::net::bedrock::{
     BedrockClient,
+    local::LocalListener,
     nethernet::{NetherNetListener, load_or_create_identity_key},
     status::{IceSocket, StatusResponder},
     transport::Transport,
@@ -243,6 +244,9 @@ pub struct PumpkinServer {
     pub tcp_listener: Option<TcpListener>,
     pub bedrock_status: Option<StatusResponder>,
     pub nethernet_listener: Option<NetherNetListener>,
+    /// Limonite seam: accepts in-process Bedrock connections, which is how a client
+    /// that embeds this server joins it as the host. Always present; it binds nothing.
+    pub local_listener: LocalListener,
 }
 
 impl PumpkinServer {
@@ -361,6 +365,7 @@ impl PumpkinServer {
             tcp_listener,
             bedrock_status,
             nethernet_listener,
+            local_listener: LocalListener::new(),
         })
     }
 
@@ -669,6 +674,21 @@ impl PumpkinServer {
                 if let Some((session, client_addr)) = nethernet_result {
                     self.accept_bedrock(
                         session,
+                        client_addr,
+                        master_client_id_counter,
+                        tasks,
+                        bedrock_clients,
+                    )
+                    .await;
+                }
+            },
+
+            // Branch for in-process Bedrock connections (Limonite's embedded host).
+            local_result = self.local_listener.accept() => {
+                if let Some((channel, client_addr)) = local_result {
+                    debug!("Accepted local Bedrock connection {client_addr}");
+                    self.accept_bedrock(
+                        channel,
                         client_addr,
                         master_client_id_counter,
                         tasks,

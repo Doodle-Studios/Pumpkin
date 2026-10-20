@@ -2,10 +2,13 @@
 
 use pumpkin_macros::packet;
 
+#[cfg(feature = "client")]
+use crate::serial::PacketRead;
 use crate::serial::PacketWrite;
 
 /// Sent by the server to inform the client of login results, version compatibility, or player spawn readiness.
 #[derive(Clone, Copy, PacketWrite)]
+#[cfg_attr(feature = "client", derive(PacketRead))]
 #[repr(i32)]
 #[serial(big_endian)]
 #[packet(2)]

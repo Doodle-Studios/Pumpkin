@@ -1,5 +1,7 @@
 use pumpkin_macros::packet;
 
+#[cfg(feature = "client")]
+use crate::serial::PacketRead;
 use crate::{codec::var_uint::VarUInt, serial::PacketWrite};
 
 /// Sent by the server to update gamerules on the client (e.g. `showcoordinates` or `dodaylightcycle`).
@@ -12,6 +14,7 @@ pub struct CGamerulesChanged {
 
 /// An individual gamerule entry with its identifier, edit permission, and typed value.
 #[derive(PacketWrite)]
+#[cfg_attr(feature = "client", derive(PacketRead))]
 pub struct GameRule {
     /// Name of the gamerule in lowercase (e.g. `showcoordinates`).
     pub rule_name: String,

@@ -10,6 +10,10 @@ default = ["query"]
 serverbound = []
 clientbound = []
 query = []
+# Limonite: the client side of the Bedrock codecs (writers for packets a client sends, readers
+# for packets it receives), for a client that embeds this server. Off by default, so server
+# builds are unchanged.
+client = []
 
 [dependencies]
 pumpkin-nbt.workspace = true

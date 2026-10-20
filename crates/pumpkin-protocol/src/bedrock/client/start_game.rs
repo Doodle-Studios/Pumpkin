@@ -1,5 +1,7 @@
 use std::io::{Error, Write};
 
+#[cfg(feature = "client")]
+use crate::serial::PacketRead;
 use crate::{
     bedrock::client::{GameType, gamerules_changed::GameRule},
     codec::{var_int::VarInt, var_long::VarLong, var_uint::VarUInt, var_ulong::VarULong},
@@ -12,6 +14,7 @@ use uuid::Uuid;
 
 /// Sent by the server to initialize the client's world, spawn coordinates, gamerules, and entity runtime ID.
 #[derive(PacketWrite)]
+#[cfg_attr(feature = "client", derive(PacketRead))]
 #[packet(11)]
 pub struct CStartGame {
     /// Persistent unique ID of the player entity across sessions.
@@ -82,6 +85,7 @@ pub struct CStartGame {
 }
 
 #[derive(PacketWrite)]
+#[cfg_attr(feature = "client", derive(PacketRead))]
 pub struct ServerJoinInformation {
     gathering: Option<GatheringJoinInfo>,
     store_entry_point: Option<StoreEntryPointInfo>,
@@ -89,6 +93,7 @@ pub struct ServerJoinInformation {
 }
 
 #[derive(PacketWrite)]
+#[cfg_attr(feature = "client", derive(PacketRead))]
 pub struct GatheringJoinInfo {
     experience_id: Uuid,
     experience_name: String,
@@ -101,18 +106,21 @@ pub struct GatheringJoinInfo {
 }
 
 #[derive(PacketWrite)]
+#[cfg_attr(feature = "client", derive(PacketRead))]
 pub struct StoreEntryPointInfo {
     store_id: String,
     store_name: String,
 }
 
 #[derive(PacketWrite)]
+#[cfg_attr(feature = "client", derive(PacketRead))]
 pub struct PresenceInfo {
     experience_name: String,
     world_name: String,
 }
 
 #[derive(PacketWrite)]
+#[cfg_attr(feature = "client", derive(PacketRead))]
 pub struct ServerTelemetryData {
     pub server_id: String,
     pub scenario_id: String,
@@ -121,6 +129,7 @@ pub struct ServerTelemetryData {
 }
 
 #[derive(PacketWrite)]
+#[cfg_attr(feature = "client", derive(PacketRead))]
 pub struct LevelSettings {
     // https://mojang.github.io/bedrock-protocol-docs/html/LevelSettings.html
     pub seed: u64,
@@ -206,12 +215,14 @@ impl PacketWrite for Experiments {
 }
 
 #[derive(PacketWrite)]
+#[cfg_attr(feature = "client", derive(PacketRead))]
 pub struct ExperimentToggle {
     pub name: String,
     pub enabled: bool,
 }
 
 #[derive(Clone, Copy, PacketWrite)]
+#[cfg_attr(feature = "client", derive(PacketRead))]
 #[repr(i32)]
 #[serial(varint)]
 pub enum GamePublishSetting {
@@ -227,6 +238,7 @@ pub enum GamePublishSetting {
 /// The runtime ID of these custom block entries is based on their alphabetic index
 /// within the registered block palette.
 #[derive(Clone, Debug, PartialEq, PacketWrite)]
+#[cfg_attr(feature = "client", derive(PacketRead))]
 pub struct BlockProperty {
     /// Name or identifier of the custom block (e.g. `namespace:block`).
     pub name: String,

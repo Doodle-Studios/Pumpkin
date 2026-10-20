@@ -1,5 +1,7 @@
 use pumpkin_util::GameMode;
 
+#[cfg(feature = "client")]
+use crate::serial::PacketRead;
 use crate::{codec::var_long::VarLong, serial::PacketWrite};
 
 /// Operating system or client platform identifier reported by the client.
@@ -25,6 +27,7 @@ pub enum BuildPlatform {
 
 /// Game mode identifier used in Bedrock protocol packets.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PacketWrite)]
+#[cfg_attr(feature = "client", derive(PacketRead))]
 #[repr(i32)]
 #[serial(varint)]
 pub enum GameType {

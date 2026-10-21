@@ -1,4 +1,4 @@
-use std::{collections::HashMap, hash::Hash};
+use std::hash::Hash;
 
 use pumpkin_data::{
     BlockState, BlockStateId,
@@ -6,6 +6,7 @@ use pumpkin_data::{
     fluid::Fluid,
 };
 use pumpkin_util::encompassing_bits;
+use rustc_hash::FxHashMap;
 use tracing::warn;
 
 use super::format::{ChunkSectionBiomes, ChunkSectionBlockStates};
@@ -16,6 +17,28 @@ fn bedrock_palette_bits(palette_len: usize) -> u8 {
         7..=8 => 8,
         _ => 16,
     }
+}
+
+/// Packs the indices of a 16x16x16 Bedrock storage into little-endian words,
+/// `32 / bits_per_entry` per word, in Bedrock's x, z, y order.
+/// `index_at(x, y, z)` gives the index for each position.
+fn pack_bedrock_storage(
+    bits_per_entry: u8,
+    index_at: impl Fn(usize, usize, usize) -> u32,
+) -> Box<[u32]> {
+    let per_word = usize::from(32 / bits_per_entry);
+    let mut words = vec![0u32; 4096usize.div_ceil(per_word)];
+    let mut i = 0;
+    for x in 0..16 {
+        for z in 0..16 {
+            for y in 0..16 {
+                let shift = u32::from(bits_per_entry) * (i % per_word) as u32;
+                words[i / per_word] |= index_at(x, y, z) << shift;
+                i += 1;
+            }
+        }
+    }
+    words.into_boxed_slice()
 }
 
 /// 3d array indexed by y,z,x
@@ -151,6 +174,45 @@ impl<V: Hash + Eq + Copy + Default, const DIM: usize> HeterogeneousPaletteData<V
         }
 
         original
+    }
+
+    /// The palette index Bedrock's conversion writes for each position, in
+    /// this container's y, z, x order.
+    ///
+    /// That's the last palette entry equal to the stored value, which is what
+    /// a key-to-index map collected from the palette gives, or 0 for a value
+    /// missing from the palette. `Indexed` storage already holds an index, so
+    /// it only goes through a per-entry table (which differs from the identity
+    /// only if the palette repeats a value), and `Dense` storage hashes each
+    /// value with `FxHash`.
+    fn network_indices(&self) -> Box<[u16]> {
+        let key_to_index: FxHashMap<V, u16> = self
+            .palette
+            .iter()
+            .enumerate()
+            .map(|(index, key)| (*key, index as u16))
+            .collect();
+        match &self.storage {
+            PaletteStorage::Indexed(indices) => {
+                let per_entry: Vec<u16> = self
+                    .palette
+                    .iter()
+                    .map(|key| key_to_index.get(key).copied().unwrap_or(0))
+                    .collect();
+                indices
+                    .as_flattened()
+                    .as_flattened()
+                    .iter()
+                    .map(|&index| per_entry[usize::from(index)])
+                    .collect()
+            }
+            PaletteStorage::Dense(cube) => cube
+                .as_flattened()
+                .as_flattened()
+                .iter()
+                .map(|key| key_to_index.get(key).copied().unwrap_or(0))
+                .collect(),
+        }
     }
 }
 
@@ -578,45 +640,11 @@ impl BiomePalette {
             Self::Heterogeneous(data) => {
                 let bits_per_entry = bedrock_palette_bits(data.palette.len());
 
-                let key_to_index_map: HashMap<_, usize> = data
-                    .palette
-                    .iter()
-                    .enumerate()
-                    .map(|(index, key)| (*key, index))
-                    .collect();
-
-                let biomes_per_word = 32 / bits_per_entry;
-                let volume: usize = 4096;
-                let expected_word_count = volume.div_ceil(biomes_per_word as usize);
-                let mut packed_data = Vec::with_capacity(expected_word_count);
-
-                let mut current_word: u32 = 0;
-                let mut current_index_in_word = 0;
-
-                for x in 0..16 {
-                    for y in 0..16 {
-                        for z in 0..16 {
-                            let key = self.get(x / 4, z / 4, y / 4);
-                            let key_index = key_to_index_map.get(&key).unwrap_or(&0);
-                            debug_assert!((1 << bits_per_entry) > *key_index);
-
-                            current_word |= (*key_index as u32)
-                                << (bits_per_entry as u32 * current_index_in_word);
-                            current_index_in_word += 1;
-
-                            if current_index_in_word == biomes_per_word as u32 {
-                                packed_data.push(current_word);
-                                current_word = 0;
-                                current_index_in_word = 0;
-                            }
-                        }
-                    }
-                }
-
-                // Push any remaining bits if the volume isn't a multiple of biomes_per_word
-                if current_index_in_word > 0 {
-                    packed_data.push(current_word);
-                }
+                // One index per 4x4x4 biome cell, spread over its 64 blocks.
+                let indices = data.network_indices();
+                let packed_data = pack_bedrock_storage(bits_per_entry, |x, y, z| {
+                    u32::from(indices[((y / 4) * 4 + z / 4) * 4 + x / 4])
+                });
 
                 BeNetworkSerialization {
                     bits_per_entry,
@@ -630,7 +658,7 @@ impl BiomePalette {
                             .collect::<Vec<_>>()
                             .into_boxed_slice(),
                     ),
-                    packed_data: packed_data.into_boxed_slice(),
+                    packed_data,
                 }
             }
         }
@@ -690,26 +718,10 @@ impl BlockPalette {
                     return None;
                 }
 
-                let key_to_index = data
-                    .palette
-                    .iter()
-                    .enumerate()
-                    .map(|(index, &id)| (id, index))
-                    .collect::<HashMap<_, _>>();
-                let mut packed_data = vec![0u32; Self::VOLUME / u32::BITS as usize];
-                let mut output_index = 0;
-                for x in 0..Self::SIZE {
-                    for y in 0..Self::SIZE {
-                        for z in 0..Self::SIZE {
-                            let palette_index = key_to_index[&data.get(x, z, y)];
-                            if water_states[palette_index] {
-                                packed_data[output_index / u32::BITS as usize] |=
-                                    1 << (output_index % u32::BITS as usize);
-                            }
-                            output_index += 1;
-                        }
-                    }
-                }
+                let indices = data.network_indices();
+                let packed_data = pack_bedrock_storage(1, |x, y, z| {
+                    u32::from(water_states[usize::from(indices[(y * 16 + z) * 16 + x])])
+                });
 
                 Some(BeNetworkSerialization {
                     bits_per_entry: 1,
@@ -717,7 +729,7 @@ impl BlockPalette {
                         BlockState::to_be_network_id(air),
                         BlockState::to_be_network_id(water),
                     ])),
-                    packed_data: packed_data.into_boxed_slice(),
+                    packed_data,
                 })
             }
         }
@@ -787,46 +799,12 @@ impl BlockPalette {
             Self::Heterogeneous(data) => {
                 let bits_per_entry = bedrock_palette_bits(data.palette.len());
 
-                let key_to_index_map: HashMap<_, usize> = data
-                    .palette
-                    .iter()
-                    .enumerate()
-                    .map(|(index, key)| (*key, index))
-                    .collect();
-
-                let blocks_per_word = 32 / bits_per_entry;
-                let expected_word_count = Self::VOLUME.div_ceil(blocks_per_word as usize);
-                let mut packed_data = Vec::with_capacity(expected_word_count);
-
-                let mut current_word: u32 = 0;
-                let mut current_index_in_word = 0;
-
-                for x in 0..16 {
-                    for y in 0..16 {
-                        for z in 0..16 {
-                            // Java has it in y, z, x order, so we need to convert it back to x, y, z
-                            // Please test your code on bedrock before merging
-                            let key = data.get(x, z, y);
-                            let key_index = key_to_index_map.get(&key).unwrap_or(&0);
-                            debug_assert!((1 << bits_per_entry) > *key_index);
-
-                            current_word |= (*key_index as u32)
-                                << (bits_per_entry as u32 * current_index_in_word);
-                            current_index_in_word += 1;
-
-                            if current_index_in_word == blocks_per_word as u32 {
-                                packed_data.push(current_word);
-                                current_word = 0;
-                                current_index_in_word = 0;
-                            }
-                        }
-                    }
-                }
-
-                // Push any remaining bits if the volume isn't a multiple of blocks_per_word
-                if current_index_in_word > 0 {
-                    packed_data.push(current_word);
-                }
+                // Java stores y, z, x; `pack_bedrock_storage` walks Bedrock's
+                // x, z, y. Please test your code on bedrock before merging.
+                let indices = data.network_indices();
+                let packed_data = pack_bedrock_storage(bits_per_entry, |x, y, z| {
+                    u32::from(indices[(y * 16 + z) * 16 + x])
+                });
 
                 BeNetworkSerialization {
                     bits_per_entry,
@@ -836,7 +814,7 @@ impl BlockPalette {
                             .map(|&id| BlockState::to_be_network_id(id))
                             .collect(),
                     ),
-                    packed_data: packed_data.into_boxed_slice(),
+                    packed_data,
                 }
             }
         }
@@ -1213,7 +1191,7 @@ pub(crate) const BIOME_NETWORK_MAX_BITS: u8 = 7;
 
 #[cfg(test)]
 mod tests {
-    use super::{BlockPalette, NetworkPalette};
+    use super::{BeNetworkSerialization, BiomePalette, BlockPalette, NetworkPalette};
     use pumpkin_data::{Block, BlockStateId};
 
     fn network_palette_values(palette: NetworkPalette<u16>) -> Option<Box<[u16]>> {
@@ -1312,6 +1290,321 @@ mod tests {
                 .filter(|&&word| word != 0)
                 .count(),
             1
+        );
+    }
+
+    /// The Bedrock conversions as they were before they used
+    /// `network_indices`: a `HashMap` lookup per position. Kept as the oracle
+    /// the faster code must match byte for byte.
+    mod oracle {
+        use std::collections::HashMap;
+
+        use pumpkin_data::BlockState;
+
+        use super::super::{
+            BeNetworkSerialization, BiomePalette, BlockPalette, NetworkPalette, bedrock_palette_bits,
+            bedrock_water_state,
+        };
+
+        pub fn block(palette: &BlockPalette) -> BeNetworkSerialization<u32> {
+            match palette {
+                BlockPalette::Homogeneous(registry_id) => BeNetworkSerialization {
+                    bits_per_entry: 0,
+                    palette: NetworkPalette::Single(BlockState::to_be_network_id(*registry_id)),
+                    packed_data: Box::new([]),
+                },
+                BlockPalette::Heterogeneous(data) => {
+                    let bits_per_entry = bedrock_palette_bits(data.palette.len());
+                    let key_to_index_map: HashMap<_, usize> = data
+                        .palette
+                        .iter()
+                        .enumerate()
+                        .map(|(index, key)| (*key, index))
+                        .collect();
+                    let blocks_per_word = 32 / bits_per_entry;
+                    let mut packed_data = Vec::new();
+                    let mut current_word: u32 = 0;
+                    let mut current_index_in_word = 0;
+                    for x in 0..16 {
+                        for y in 0..16 {
+                            for z in 0..16 {
+                                let key = data.get(x, z, y);
+                                let key_index = key_to_index_map.get(&key).unwrap_or(&0);
+                                current_word |= (*key_index as u32)
+                                    << (u32::from(bits_per_entry) * current_index_in_word);
+                                current_index_in_word += 1;
+                                if current_index_in_word == u32::from(blocks_per_word) {
+                                    packed_data.push(current_word);
+                                    current_word = 0;
+                                    current_index_in_word = 0;
+                                }
+                            }
+                        }
+                    }
+                    if current_index_in_word > 0 {
+                        packed_data.push(current_word);
+                    }
+                    BeNetworkSerialization {
+                        bits_per_entry,
+                        palette: NetworkPalette::Indirect(
+                            data.palette
+                                .iter()
+                                .map(|&id| BlockState::to_be_network_id(id))
+                                .collect(),
+                        ),
+                        packed_data: packed_data.into_boxed_slice(),
+                    }
+                }
+            }
+        }
+
+        pub fn water(palette: &BlockPalette) -> Option<BeNetworkSerialization<u32>> {
+            let air = pumpkin_data::Block::AIR.default_state.id;
+            let water = pumpkin_data::Block::WATER.default_state.id;
+            match palette {
+                BlockPalette::Homogeneous(id) => {
+                    (bedrock_water_state(*id) != air).then_some(BeNetworkSerialization {
+                        bits_per_entry: 0,
+                        palette: NetworkPalette::Single(BlockState::to_be_network_id(water)),
+                        packed_data: Box::new([]),
+                    })
+                }
+                BlockPalette::Heterogeneous(data) => {
+                    let water_states = data
+                        .palette
+                        .iter()
+                        .map(|&id| bedrock_water_state(id) != air)
+                        .collect::<Vec<_>>();
+                    if !water_states.iter().any(|&waterlogged| waterlogged) {
+                        return None;
+                    }
+                    let key_to_index = data
+                        .palette
+                        .iter()
+                        .enumerate()
+                        .map(|(index, &id)| (id, index))
+                        .collect::<HashMap<_, _>>();
+                    let mut packed_data = vec![0u32; 4096 / u32::BITS as usize];
+                    let mut output_index = 0;
+                    for x in 0..16 {
+                        for y in 0..16 {
+                            for z in 0..16 {
+                                let palette_index = key_to_index[&data.get(x, z, y)];
+                                if water_states[palette_index] {
+                                    packed_data[output_index / u32::BITS as usize] |=
+                                        1 << (output_index % u32::BITS as usize);
+                                }
+                                output_index += 1;
+                            }
+                        }
+                    }
+                    Some(BeNetworkSerialization {
+                        bits_per_entry: 1,
+                        palette: NetworkPalette::Indirect(Box::new([
+                            BlockState::to_be_network_id(air),
+                            BlockState::to_be_network_id(water),
+                        ])),
+                        packed_data: packed_data.into_boxed_slice(),
+                    })
+                }
+            }
+        }
+
+        pub fn biome(palette: &BiomePalette) -> BeNetworkSerialization<u8> {
+            match palette {
+                BiomePalette::Homogeneous(registry_id) => BeNetworkSerialization {
+                    bits_per_entry: 0,
+                    palette: NetworkPalette::Single(
+                        pumpkin_data::biome::Biome::from_id(*registry_id)
+                            .map_or(1, |b| b.be_network_id),
+                    ),
+                    packed_data: Box::new([]),
+                },
+                BiomePalette::Heterogeneous(data) => {
+                    let bits_per_entry = bedrock_palette_bits(data.palette.len());
+                    let key_to_index_map: HashMap<_, usize> = data
+                        .palette
+                        .iter()
+                        .enumerate()
+                        .map(|(index, key)| (*key, index))
+                        .collect();
+                    let biomes_per_word = 32 / bits_per_entry;
+                    let mut packed_data = Vec::new();
+                    let mut current_word: u32 = 0;
+                    let mut current_index_in_word = 0;
+                    for x in 0..16 {
+                        for y in 0..16 {
+                            for z in 0..16 {
+                                let key = palette.get(x / 4, z / 4, y / 4);
+                                let key_index = key_to_index_map.get(&key).unwrap_or(&0);
+                                current_word |= (*key_index as u32)
+                                    << (u32::from(bits_per_entry) * current_index_in_word);
+                                current_index_in_word += 1;
+                                if current_index_in_word == u32::from(biomes_per_word) {
+                                    packed_data.push(current_word);
+                                    current_word = 0;
+                                    current_index_in_word = 0;
+                                }
+                            }
+                        }
+                    }
+                    if current_index_in_word > 0 {
+                        packed_data.push(current_word);
+                    }
+                    BeNetworkSerialization {
+                        bits_per_entry,
+                        palette: NetworkPalette::Indirect(
+                            data.palette
+                                .iter()
+                                .map(|&id| {
+                                    pumpkin_data::biome::Biome::from_id(id)
+                                        .map_or(1, |b| b.be_network_id)
+                                })
+                                .collect::<Vec<_>>()
+                                .into_boxed_slice(),
+                        ),
+                        packed_data: packed_data.into_boxed_slice(),
+                    }
+                }
+            }
+        }
+    }
+
+    fn palette_values<V>(palette: NetworkPalette<V>) -> Option<Box<[V]>> {
+        match palette {
+            NetworkPalette::Single(value) => Some(Box::new([value])),
+            NetworkPalette::Indirect(values) => Some(values),
+            NetworkPalette::Direct => None,
+        }
+    }
+
+    fn assert_same<V: PartialEq + std::fmt::Debug>(
+        new: BeNetworkSerialization<V>,
+        old: BeNetworkSerialization<V>,
+        what: &str,
+    ) {
+        assert_eq!(new.bits_per_entry, old.bits_per_entry, "{what}: width");
+        assert_eq!(new.packed_data, old.packed_data, "{what}: words");
+        assert_eq!(
+            palette_values(new.palette),
+            palette_values(old.palette),
+            "{what}: palette"
+        );
+    }
+
+    fn assert_blocks_match_oracle(palette: &BlockPalette, what: &str) {
+        assert_same(palette.convert_be_network(), oracle::block(palette), what);
+        match (palette.convert_be_water_network(), oracle::water(palette)) {
+            (Some(new), Some(old)) => assert_same(new, old, &format!("{what}, water layer")),
+            (None, None) => {}
+            (new, old) => panic!(
+                "{what}: water layer present {} here, {} in the oracle",
+                new.is_some(),
+                old.is_some()
+            ),
+        }
+    }
+
+    /// A state id that cycles through `count` states starting at `first`.
+    fn cycling(first: u16, count: u16) -> impl Fn(usize, usize, usize) -> BlockStateId {
+        move |x, y, z| {
+            BlockStateId::new(first + ((y * 256 + z * 16 + x) % usize::from(count)) as u16)
+                .unwrap()
+        }
+    }
+
+    #[test]
+    fn bedrock_block_conversion_matches_the_oracle() {
+        assert_blocks_match_oracle(
+            &BlockPalette::from_fn(|_, _, _| Block::STONE.default_state.id),
+            "homogeneous stone",
+        );
+        assert_blocks_match_oracle(
+            &BlockPalette::from_fn(|_, _, _| Block::WATER.default_state.id),
+            "homogeneous water",
+        );
+        // 2 to 256 states use `Indexed` storage, 257 and more `Dense`. Ids
+        // from 0 cover air, stone, dirt and saplings; from 1000, blocks
+        // that can be waterlogged.
+        for count in [2, 16, 65, 256, 257, 300] {
+            for first in [0, 1000] {
+                let palette = BlockPalette::from_fn(cycling(first, count));
+                assert_blocks_match_oracle(&palette, &format!("{count} states from {first}"));
+            }
+        }
+    }
+
+    #[test]
+    fn bedrock_water_layer_matches_the_oracle() {
+        let waterlogged = Block::OAK_STAIRS
+            .states
+            .iter()
+            .map(|state| state.id)
+            .find(|&id| super::bedrock_water_state(id) != Block::AIR.default_state.id)
+            .unwrap();
+        let mix = [
+            Block::AIR.default_state.id,
+            Block::STONE.default_state.id,
+            Block::WATER.default_state.id,
+            Block::SEAGRASS.default_state.id,
+            Block::KELP.default_state.id,
+            waterlogged,
+        ];
+        let palette = BlockPalette::from_fn(|x, y, z| mix[(x * 7 + y * 3 + z) % mix.len()]);
+        assert_blocks_match_oracle(&palette, "water mix");
+
+        // One waterlogged block, then made heterogeneous by mutation, as
+        // gameplay does it.
+        let mut palette = BlockPalette::default();
+        palette.set(3, 9, 12, waterlogged);
+        palette.set(4, 9, 12, Block::STONE.default_state.id);
+        assert_blocks_match_oracle(&palette, "mutated water mix");
+    }
+
+    #[test]
+    fn bedrock_conversion_matches_the_oracle_with_a_repeated_palette_entry() {
+        // A palette that repeats a value can come from disk. Collecting it
+        // into a map keeps the last index, and the new code must too.
+        let stone = Block::STONE.default_state.id;
+        let dirt = Block::DIRT.default_state.id;
+        // Disk packing: 4 bits per index, 16 indices per i64, cycling 0, 1, 2.
+        let mut word = 0i64;
+        for slot in 0..16 {
+            word |= (slot % 3) << (slot * 4);
+        }
+        let packed = vec![word; 256];
+        let palette = BlockPalette::from_palette_and_packed_data(&[stone, dirt, stone], &packed, 4);
+        assert_blocks_match_oracle(&palette, "repeated entry, indexed");
+
+        let mut long: Vec<_> = (0..300).map(|n| BlockStateId::new(n).unwrap()).collect();
+        long.push(stone);
+        let packed: Vec<i64> = (0..820).map(|n| (n * 2_654_435_761) & 0x7fff_ffff).collect();
+        let palette = BlockPalette::from_palette_and_packed_data(&long, &packed, 9);
+        assert_blocks_match_oracle(&palette, "repeated entry, dense");
+    }
+
+    #[test]
+    fn bedrock_biome_conversion_matches_the_oracle() {
+        let cases: [(&str, BiomePalette); 4] = [
+            ("homogeneous", BiomePalette::from_fn(|_, _, _| 5)),
+            ("2 biomes", BiomePalette::from_fn(|x, _, _| (x % 2) as u8)),
+            ("5 biomes", BiomePalette::from_fn(|x, y, z| ((x + y + z) % 5) as u8 + 10)),
+            ("64 biomes", BiomePalette::from_fn(|x, y, z| (y * 16 + z * 4 + x) as u8)),
+        ];
+        for (what, palette) in cases {
+            assert_same(palette.convert_be_network(), oracle::biome(&palette), what);
+        }
+        // A repeated entry. Disk packing for three entries: 2 bits per index,
+        // 32 indices per i64, cycling 0, 1, 2 over the 64 cells.
+        let mut word = 0i64;
+        for slot in 0..32 {
+            word |= (slot % 3) << (slot * 2);
+        }
+        let palette = BiomePalette::from_palette_and_packed_data(&[3, 7, 3], &[word, word], 0);
+        assert_same(
+            palette.convert_be_network(),
+            oracle::biome(&palette),
+            "repeated entry",
         );
     }
 }

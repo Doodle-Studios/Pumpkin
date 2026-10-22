@@ -73,7 +73,6 @@ pub struct Weather {
     /// Modifier affecting the base temperature.
     temperature_modifier: TemperatureModifier,
     /// Rate of rainfall or snowfall in the biome.
-    #[expect(dead_code)]
     downfall: f32,
 }
 
@@ -104,6 +103,16 @@ impl Weather {
     #[must_use]
     pub const fn base_temperature(&self) -> f32 {
         self.temperature
+    }
+
+    /// Returns the biome's downfall, from 0 (dry) to 1 (wet).
+    ///
+    /// Limonite: clients colour grass and leaves by it. Both Java and Bedrock
+    /// sample the grass and foliage colormaps at a biome's temperature and
+    /// downfall.
+    #[must_use]
+    pub const fn downfall(&self) -> f32 {
+        self.downfall
     }
 
     /// Computes the effective temperature at a given position.

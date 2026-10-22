@@ -19,6 +19,7 @@ mod disconnect;
 mod gamerules_changed;
 mod login;
 mod nbt;
+mod network_chunk_publisher_update;
 mod player_auth_input;
 mod resource_pack_client_response;
 mod start_game;

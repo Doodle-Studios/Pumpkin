@@ -1,5 +1,7 @@
 use std::io::{Error, Write};
 
+#[cfg(feature = "client")]
+use crate::serial::PacketRead;
 use crate::{
     bedrock::network_item::FullContainerName,
     codec::{var_int::VarInt, var_uint::VarUInt},
@@ -48,6 +50,7 @@ impl PacketWrite for ItemStackResponseSlotInfo {
 }
 
 #[derive(PacketWrite, Debug, Clone)]
+#[cfg_attr(feature = "client", derive(PacketRead))]
 pub struct ItemStackResponseContainerInfo {
     pub full_container_name: FullContainerName,
     pub slots: Vec<ItemStackResponseSlotInfo>,

@@ -1,5 +1,7 @@
 // Last verified for v2169
 
+#[cfg(feature = "client")]
+use crate::serial::PacketRead;
 use crate::{
     bedrock::network_item::{FullContainerName, NetworkItemStackDescriptor},
     codec::var_uint::VarUInt,
@@ -9,6 +11,7 @@ use pumpkin_macros::packet;
 
 /// Sent by the server to update a single item slot within an open inventory container.
 #[derive(PacketWrite)]
+#[cfg_attr(feature = "client", derive(PacketRead))]
 #[packet(50)]
 pub struct CInventorySlot {
     /// Window ID of the container being updated.

@@ -2,6 +2,8 @@
 
 use pumpkin_macros::packet;
 
+#[cfg(feature = "client")]
+use crate::serial::PacketRead;
 use crate::{
     bedrock::network_item::{FullContainerName, NetworkItemStackDescriptor},
     codec::var_uint::VarUInt,
@@ -10,6 +12,7 @@ use crate::{
 
 /// Sent by the server to synchronize the entire contents of an inventory or container window.
 #[derive(PacketWrite)]
+#[cfg_attr(feature = "client", derive(PacketRead))]
 #[packet(49)]
 pub struct CInventoryContent {
     /// Window ID of the container being populated.

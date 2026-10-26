@@ -16,8 +16,11 @@
 //! trip through Pumpkin's own writer.
 
 mod actor_data;
+pub mod creative_content;
 mod disconnect;
 mod gamerules_changed;
+mod item_registry;
+mod item_stack_response;
 mod login;
 mod move_actor_delta;
 mod move_player;
@@ -25,6 +28,8 @@ mod network_chunk_publisher_update;
 mod player_auth_input;
 mod resource_pack_client_response;
 mod start_game;
+
+pub use creative_content::CreativeContent;
 
 /// Tests for the packets whose client-side codec is a derive next to the struct.
 #[cfg(test)]
@@ -41,13 +46,19 @@ mod tests {
                 CommandPermissionLevel, GameType, PlayerPermissionLevel, SerializedAbilitiesData,
                 SerializedAbilitiesDataSerializedLayer, SyncedAttribute,
                 chunk_radius_updated::CChunkRadiusUpdated,
+                container_open::CContainerOpen,
+                inventory_content::CInventoryContent,
+                inventory_slot::CInventorySlot,
                 play_status::CPlayStatus,
+                player_hotbar::CPlayerHotbar,
                 set_actor_data::{MetadataValue, PropertySyncData, SyncedActorDataList},
                 update_block::CUpdateBlock,
             },
-            network_item::{ItemStackWrapper, NetworkItemStackDescriptor},
+            network_item::{
+                ContainerName, FullContainerName, ItemStackWrapper, NetworkItemStackDescriptor,
+            },
             server::{
-                request_chunk_radius::SRequestChunkRadius,
+                container_close::SContainerClose, request_chunk_radius::SRequestChunkRadius,
                 set_local_player_as_initialized::SSetLocalPlayerAsInitialized,
             },
         },
@@ -427,5 +438,106 @@ mod tests {
         assert!(matches!(read.actor_data.0[&26], MetadataValue::Byte(-2)));
         assert_eq!(read.synced_properties.float_entries_list[&5], 1.5);
         assert_eq!(read.tick, VarULong(600));
+    }
+
+    // Inventory (M5). `item_registry.rs`, `creative_content.rs` and
+    // `item_stack_response.rs` test the mirrors.
+
+    fn stack(id: i16, stack_size: u16, net_id: i32) -> NetworkItemStackDescriptor {
+        NetworkItemStackDescriptor {
+            id,
+            stack_size,
+            aux_value: VarUInt(0),
+            block_runtime_id: VarUInt(2_186_211_206),
+            extra_data: vec![0; 10],
+            net_id: NonZero::new(net_id),
+        }
+    }
+
+    #[test]
+    fn inventory_content_round_trips() {
+        let read = round_trip(&CInventoryContent {
+            container_id: VarUInt(0),
+            slots: vec![stack(3, 16, 34), NetworkItemStackDescriptor::default()],
+            full_container_name: FullContainerName {
+                container_name: ContainerName::Inventory,
+                dynamic_id: Some(2),
+            },
+            storage_item: stack(50, 4, 35),
+        });
+        assert_eq!(read.container_id, VarUInt(0));
+        assert_eq!(read.slots.len(), 2);
+        assert_eq!((read.slots[0].id, read.slots[0].stack_size), (3, 16));
+        assert_eq!(read.slots[0].net_id, NonZero::new(34));
+        assert_eq!(read.slots[1].id, 0);
+        assert_eq!(read.full_container_name.dynamic_id, Some(2));
+        assert_eq!(read.storage_item.id, 50);
+    }
+
+    #[test]
+    fn inventory_slot_round_trips() {
+        let read = round_trip(&CInventorySlot {
+            container_id: VarUInt(119),
+            slot: VarUInt(8),
+            full_container_name: Some(FullContainerName {
+                container_name: ContainerName::HotBar,
+                dynamic_id: None,
+            }),
+            storage_item: Some(stack(5, 1, 0)),
+            item: stack(3, 15, 36),
+        });
+        assert_eq!((read.container_id, read.slot), (VarUInt(119), VarUInt(8)));
+        assert_eq!(
+            read.full_container_name.map(|name| name.container_name),
+            Some(ContainerName::HotBar)
+        );
+        assert_eq!(read.storage_item.map(|item| item.id), Some(5));
+        assert_eq!((read.item.id, read.item.stack_size), (3, 15));
+
+        let read = round_trip(&CInventorySlot {
+            container_id: VarUInt(0),
+            slot: VarUInt(0),
+            full_container_name: None,
+            storage_item: None,
+            item: NetworkItemStackDescriptor::default(),
+        });
+        assert!(read.full_container_name.is_none());
+        assert!(read.storage_item.is_none());
+    }
+
+    #[test]
+    fn player_hotbar_round_trips() {
+        let read = round_trip(&CPlayerHotbar {
+            selected_slot: VarUInt(7),
+            container_id: 0x7C,
+            should_select_slot: true,
+        });
+        assert_eq!(read.selected_slot, VarUInt(7));
+        assert_eq!(read.container_id, 0x7C);
+        assert!(read.should_select_slot);
+    }
+
+    #[test]
+    fn container_open_round_trips() {
+        let read = round_trip(&CContainerOpen {
+            container_id: 3,
+            container_type: 0xF7,
+            position: BlockPos(Vector3::new(-17, 64, 205)),
+            target_entity_id: VarLong(-1),
+        });
+        assert_eq!((read.container_id, read.container_type), (3, 0xF7));
+        assert_eq!(read.position, BlockPos(Vector3::new(-17, 64, 205)));
+        assert_eq!(read.target_entity_id, VarLong(-1));
+    }
+
+    #[test]
+    fn container_close_matches_the_official_client() {
+        // Pumpkin sends its serverbound struct to clients too, so the same
+        // codec reads the server's close and writes ours.
+        let fixture = include_bytes!("fixtures/container_close.bin");
+        let (packet, written) = read_and_rewrite::<SContainerClose>(fixture);
+        assert_eq!((packet.container_id, packet.container_type), (0, 247));
+        assert!(!packet.server_initiated_close);
+        assert_eq!(written, fixture);
     }
 }

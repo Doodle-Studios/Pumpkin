@@ -1,9 +1,12 @@
 use pumpkin_macros::packet;
 
+#[cfg(feature = "client")]
+use crate::serial::PacketRead;
 use crate::{codec::var_int::VarInt, serial::PacketWrite};
 
 /// Sent by the server to register custom and vanilla item identifiers with their component definitions.
 #[derive(PacketWrite)]
+#[cfg_attr(feature = "client", derive(PacketRead))]
 #[packet(162)]
 pub struct CItemRegistry {
     // https://mojang.github.io/bedrock-protocol-docs/docs/ItemRegistryPacket.html

@@ -3,10 +3,13 @@
 use pumpkin_macros::packet;
 use pumpkin_util::math::position::BlockPos;
 
+#[cfg(feature = "client")]
+use crate::serial::PacketRead;
 use crate::{codec::var_long::VarLong, serial::PacketWrite};
 
 /// Sent by the server to open an inventory container screen (chest, furnace, anvil) on the client.
 #[derive(PacketWrite)]
+#[cfg_attr(feature = "client", derive(PacketRead))]
 #[packet(46)]
 pub struct CContainerOpen {
     /// Window ID assigned to the opened container session.

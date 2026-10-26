@@ -629,7 +629,7 @@ fn read_user_data_strings<R: Read>(reader: &mut R) -> Result<Vec<String>, Error>
     Ok(values)
 }
 
-fn read_user_data(
+pub(crate) fn read_user_data(
     user_data: Vec<u8>,
     is_shield: bool,
 ) -> Result<(Nbt, Vec<String>, Vec<String>, i64), Error> {

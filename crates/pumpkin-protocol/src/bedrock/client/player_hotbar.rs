@@ -2,10 +2,13 @@
 
 use pumpkin_macros::packet;
 
+#[cfg(feature = "client")]
+use crate::serial::PacketRead;
 use crate::{codec::var_uint::VarUInt, serial::PacketWrite};
 
 /// Sent by the server to update the active selected hotbar slot of the player.
 #[derive(PacketWrite)]
+#[cfg_attr(feature = "client", derive(PacketRead))]
 #[packet(48)]
 pub struct CPlayerHotbar {
     /// Zero-based slot index selected in the hotbar.

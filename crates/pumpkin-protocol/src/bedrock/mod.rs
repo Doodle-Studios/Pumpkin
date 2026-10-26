@@ -6,7 +6,7 @@
 
 pub mod client;
 #[cfg(feature = "client")]
-mod client_codecs;
+pub mod client_codecs;
 pub mod enum_as_str;
 pub mod network_item;
 pub mod packet_decoder;

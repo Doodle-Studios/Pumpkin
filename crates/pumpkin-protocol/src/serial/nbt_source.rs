@@ -1,32 +1,21 @@
+//! Limonite: lets the NBT reader pull from any [`Read`], taking exactly the compound's own bytes.
+//!
+//! A packet reader only has [`Read`]. `pumpkin-nbt`'s own source adapter also needs [`io::Seek`],
+//! and reading the rest of the packet into a buffer first would swallow every field after the
+//! compound, such as the ones after the NBT in `StartGame`'s block properties. Seeking is only
+//! used to skip forward, so this adapter reads and discards instead.
+
 use std::{
     borrow::Cow,
-    io::{self, Error, ErrorKind, Read},
+    io::{self, ErrorKind, Read},
 };
 
-use pumpkin_nbt::{
-    Nbt, NbtCompound,
-    deserializer::{NbtDataSource, NbtReadHelperBedrock},
-};
+use pumpkin_nbt::deserializer::NbtDataSource;
 
-use crate::serial::PacketRead;
-
-/// Mirrors `PacketWrite for NbtCompound`, which writes the compound as a
-/// nameless Bedrock network NBT document.
-impl PacketRead for NbtCompound {
-    fn read<R: Read>(reader: &mut R) -> Result<Self, Error> {
-        let mut helper = NbtReadHelperBedrock::new(ReadSource(reader));
-        Nbt::read(&mut helper)
-            .map(|nbt| nbt.root_tag)
-            .map_err(|err| Error::new(ErrorKind::InvalidData, err))
-    }
-}
-
-/// Lets the NBT reader pull from any [`Read`].
+/// An [`NbtDataSource`] over any [`Read`], which never reads past the compound.
 ///
-/// `pumpkin-nbt`'s own adapter needs [`io::Seek`] as well, which a packet
-/// reader doesn't have. Seeking is only used to skip forward, so this reads
-/// and discards instead.
-struct ReadSource<'r, R>(&'r mut R);
+/// `pub` here reaches only the rest of this crate, because the module itself is private.
+pub struct ReadSource<'r, R>(pub &'r mut R);
 
 impl<'a, R: Read> NbtDataSource<'a> for ReadSource<'_, R> {
     fn read_u8(&mut self) -> pumpkin_nbt::deserializer::Result<u8> {
@@ -76,10 +65,9 @@ impl<'a, R: Read> NbtDataSource<'a> for ReadSource<'_, R> {
 
 #[cfg(test)]
 mod tests {
-    use pumpkin_nbt::tag::NbtTag;
+    use pumpkin_nbt::{compound::NbtCompound, tag::NbtTag};
 
-    use super::*;
-    use crate::serial::PacketWrite;
+    use crate::serial::{PacketRead, PacketWrite};
 
     /// Compares the decoded compound, not the re-encoded bytes: `NbtCompound`
     /// keeps its tags in a `HashMap`, whose iteration order differs between
@@ -102,5 +90,20 @@ mod tests {
         let mut second = Vec::new();
         read.write(&mut second).unwrap();
         assert_eq!(first.len(), second.len());
+    }
+
+    /// A field after the compound is still there for the next reader.
+    #[test]
+    fn leaves_what_follows_the_compound() {
+        let mut compound = NbtCompound::new();
+        compound.put_int("count", 3);
+
+        let mut bytes = Vec::new();
+        compound.write(&mut bytes).unwrap();
+        bytes.extend_from_slice(&[0xAB, 0xCD]);
+        let mut reader = bytes.as_slice();
+        let read = NbtCompound::read(&mut reader).unwrap();
+        assert_eq!(read, compound);
+        assert_eq!(reader, [0xAB, 0xCD]);
     }
 }

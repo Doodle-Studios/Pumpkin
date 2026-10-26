@@ -1,4 +1,5 @@
 pub mod deserializer;
+mod nbt_source;
 pub mod serializer;
 pub use pumpkin_macros::{PacketRead, PacketReadSlice, PacketWrite};
 use std::io::{Error, Read, Write};

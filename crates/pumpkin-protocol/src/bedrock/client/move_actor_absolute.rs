@@ -1,11 +1,14 @@
 // Last verified for v2169
 
+#[cfg(feature = "client")]
+use crate::serial::PacketRead;
 use crate::{codec::var_ulong::VarULong, serial::PacketWrite};
 use pumpkin_macros::packet;
 use pumpkin_util::math::vector3::Vector3;
 
 /// Sent by the server to update an entity's absolute position and rotation angles.
 #[derive(PacketWrite)]
+#[cfg_attr(feature = "client", derive(PacketRead))]
 #[packet(18)]
 pub struct CMoveActorAbsolute {
     /// Runtime entity ID of the moving actor.

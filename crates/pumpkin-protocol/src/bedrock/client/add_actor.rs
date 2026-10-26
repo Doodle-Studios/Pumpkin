@@ -1,5 +1,7 @@
 // Last verified for v2169
 
+#[cfg(feature = "client")]
+use crate::serial::PacketRead;
 use crate::{
     codec::{var_long::VarLong, var_ulong::VarULong},
     serial::PacketWrite,
@@ -14,6 +16,7 @@ use super::{
 
 /// Sent by the server to spawn non-player entities (mobs, projectiles, vehicles, items) on the client.
 #[derive(PacketWrite)]
+#[cfg_attr(feature = "client", derive(PacketRead))]
 #[packet(13)]
 pub struct CAddActor {
     /// Unique entity ID across sessions.
@@ -44,6 +47,7 @@ pub struct CAddActor {
 
 /// Synchronized numeric entity attribute with min, current, and max bounds.
 #[derive(PacketWrite)]
+#[cfg_attr(feature = "client", derive(PacketRead))]
 pub struct SyncedAttribute {
     /// Identifier string for the attribute (e.g. `minecraft:health`).
     pub attribute_name: String,

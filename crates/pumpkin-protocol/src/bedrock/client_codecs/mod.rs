@@ -15,9 +15,11 @@
 //! official Bedrock client sent (`fixtures/`), and read packets by a round
 //! trip through Pumpkin's own writer.
 
+mod actor_data;
 mod disconnect;
 mod gamerules_changed;
 mod login;
+mod move_actor_delta;
 mod move_player;
 mod network_chunk_publisher_update;
 mod player_auth_input;
@@ -27,24 +29,33 @@ mod start_game;
 /// Tests for the packets whose client-side codec is a derive next to the struct.
 #[cfg(test)]
 mod tests {
+    use std::num::NonZero;
+
     use crate::{
         bedrock::{
             client::{
-                AttributeData, AttributeModifier, CCorrectPlayerMovePrediction, CSetActorMotion,
-                CSetHealth, CSetPlayerGameType, CSetTime, CUpdateAbilities, CUpdateAttributes,
+                ActorLink, AttributeData, AttributeModifier, BuildPlatform, CAddActor,
+                CAddItemActor, CAddPlayer, CCorrectPlayerMovePrediction, CMoveActorAbsolute,
+                CRemoveActor, CSetActorData, CSetActorMotion, CSetHealth, CSetPlayerGameType,
+                CSetTime, CTakeItemActor, CUpdateAbilities, CUpdateAttributes,
                 CommandPermissionLevel, GameType, PlayerPermissionLevel, SerializedAbilitiesData,
-                SerializedAbilitiesDataSerializedLayer, chunk_radius_updated::CChunkRadiusUpdated,
-                play_status::CPlayStatus, update_block::CUpdateBlock,
+                SerializedAbilitiesDataSerializedLayer, SyncedAttribute,
+                chunk_radius_updated::CChunkRadiusUpdated,
+                play_status::CPlayStatus,
+                set_actor_data::{MetadataValue, PropertySyncData, SyncedActorDataList},
+                update_block::CUpdateBlock,
             },
+            network_item::{ItemStackWrapper, NetworkItemStackDescriptor},
             server::{
                 request_chunk_radius::SRequestChunkRadius,
                 set_local_player_as_initialized::SSetLocalPlayerAsInitialized,
             },
         },
-        codec::{var_int::VarInt, var_uint::VarUInt, var_ulong::VarULong},
+        codec::{var_int::VarInt, var_long::VarLong, var_uint::VarUInt, var_ulong::VarULong},
         serial::{PacketRead, PacketWrite},
     };
     use pumpkin_util::math::{position::BlockPos, vector2::Vector2, vector3::Vector3};
+    use uuid::Uuid;
 
     /// Reads `fixture` with Pumpkin's reader, checks every byte was used, and
     /// returns the packet with our writer's bytes.
@@ -229,5 +240,192 @@ mod tests {
     fn set_time_round_trips() {
         let read = round_trip(&CSetTime::new(-6000));
         assert_eq!(read.time, VarInt(-6000));
+    }
+
+    // Entities (M5). Each metadata map holds one entry, so the bytes round
+    // trip exactly: a `HashMap` writes several entries in no fixed order.
+    // `actor_data.rs` tests maps with every value type.
+
+    fn one_entry_data(key: u32, value: MetadataValue) -> SyncedActorDataList {
+        let mut data = SyncedActorDataList::new();
+        data.set(key, value);
+        data
+    }
+
+    fn one_entry_properties() -> PropertySyncData {
+        let mut properties = PropertySyncData::default();
+        properties.int_entries_list.insert(2, -9);
+        properties.float_entries_list.insert(5, 1.5);
+        properties
+    }
+
+    fn actor_link() -> ActorLink {
+        ActorLink {
+            ridden_unique_id: VarLong(-77),
+            rider_unique_id: VarLong(88),
+            link_type: 1,
+            immediate: true,
+            rider_initiated: true,
+            vehicle_angular_velocity: 0.25,
+        }
+    }
+
+    #[test]
+    fn add_actor_round_trips() {
+        let read = round_trip(&CAddActor {
+            target_actor_id: VarLong(-42),
+            target_runtime_id: VarULong(42),
+            actor_type: "minecraft:cow".to_string(),
+            position: Vector3::new(-10.5, 64.0, 3.25),
+            velocity: Vector3::new(0.1, -0.08, 0.0),
+            rotation: Vector2::new(12.0, 270.0),
+            y_head_rotation: 271.5,
+            y_body_rotation: 268.0,
+            attributes_list: vec![SyncedAttribute {
+                attribute_name: "minecraft:health".to_string(),
+                min_value: 0.0,
+                current_value: 7.5,
+                max_value: 10.0,
+            }],
+            actor_data: one_entry_data(0, MetadataValue::Int64(1 << 11)),
+            synced_properties: one_entry_properties(),
+            actor_links: vec![actor_link()],
+        });
+        assert_eq!(read.target_actor_id, VarLong(-42));
+        assert_eq!(read.target_runtime_id, VarULong(42));
+        assert_eq!(read.actor_type, "minecraft:cow");
+        assert_eq!(read.position, Vector3::new(-10.5, 64.0, 3.25));
+        assert_eq!(read.rotation, Vector2::new(12.0, 270.0));
+        assert_eq!((read.y_head_rotation, read.y_body_rotation), (271.5, 268.0));
+        assert_eq!(read.attributes_list[0].attribute_name, "minecraft:health");
+        assert_eq!(read.attributes_list[0].current_value, 7.5);
+        assert!(matches!(
+            read.actor_data.0[&0],
+            MetadataValue::Int64(flags) if flags == 1 << 11
+        ));
+        assert_eq!(read.synced_properties.int_entries_list[&2], -9);
+        assert_eq!(read.actor_links[0].rider_unique_id, VarLong(88));
+        assert!(read.actor_links[0].rider_initiated);
+    }
+
+    #[test]
+    fn add_player_round_trips() {
+        let read = round_trip(&CAddPlayer {
+            uuid: Uuid::from_u128(0x0123_4567_89ab_cdef_0123_4567_89ab_cdef),
+            player_name: "Guest".to_string(),
+            target_runtime_id: VarULong(5),
+            platform_chat_id: "chat".to_string(),
+            position: Vector3::new(1.5, 65.62, -2.5),
+            velocity: Vector3::new(0.0, -0.0784, 0.0),
+            rotation: Vector2::new(-10.0, 90.0),
+            y_head_rotation: 91.0,
+            carried_item: NetworkItemStackDescriptor {
+                id: 3,
+                stack_size: 16,
+                aux_value: VarUInt(0),
+                block_runtime_id: VarUInt(12_345),
+                extra_data: vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                net_id: NonZero::new(7),
+            },
+            player_game_type: GameType::Creative,
+            entity_data: one_entry_data(4, MetadataValue::String("Guest".to_string())),
+            synced_properties: one_entry_properties(),
+            abilities_data: SerializedAbilitiesData {
+                target_player_raw_id: 5,
+                player_permissions: PlayerPermissionLevel::Member,
+                command_permissions: CommandPermissionLevel::Any,
+                layers: vec![SerializedAbilitiesDataSerializedLayer::default()],
+            },
+            actor_links: vec![actor_link()],
+            device_id: "device".to_string(),
+            build_platform: BuildPlatform::Win32,
+        });
+        assert_eq!(
+            read.uuid,
+            Uuid::from_u128(0x0123_4567_89ab_cdef_0123_4567_89ab_cdef)
+        );
+        assert_eq!(read.player_name, "Guest");
+        assert_eq!(read.target_runtime_id, VarULong(5));
+        assert_eq!(read.carried_item.id, 3);
+        assert_eq!(read.carried_item.net_id, NonZero::new(7));
+        assert_eq!(read.player_game_type, GameType::Creative);
+        assert_eq!(
+            read.abilities_data.player_permissions,
+            PlayerPermissionLevel::Member
+        );
+        assert_eq!(read.device_id, "device");
+        assert_eq!(read.build_platform, BuildPlatform::Win32);
+    }
+
+    #[test]
+    fn add_item_actor_round_trips() {
+        let read = round_trip(&CAddItemActor {
+            target_actor_id: VarLong(-9),
+            target_runtime_id: VarULong(9),
+            item: ItemStackWrapper {
+                id: 3,
+                stack_size: 2,
+                block_runtime_id: VarInt(12_345),
+                ..ItemStackWrapper::default()
+            },
+            position: Vector3::new(0.5, 70.25, 0.5),
+            velocity: Vector3::new(0.01, 0.2, -0.01),
+            entity_data: one_entry_data(38, MetadataValue::Float(1.0)),
+            is_from_fishing: true,
+        });
+        assert_eq!(read.target_actor_id, VarLong(-9));
+        assert_eq!((read.item.id, read.item.stack_size), (3, 2));
+        assert_eq!(read.item.block_runtime_id, VarInt(12_345));
+        assert_eq!(read.velocity, Vector3::new(0.01, 0.2, -0.01));
+        assert!(read.is_from_fishing);
+    }
+
+    #[test]
+    fn remove_actor_round_trips() {
+        let read = round_trip(&CRemoveActor::new(VarLong(-12_345)));
+        assert_eq!(read.target_actor_id, VarLong(-12_345));
+    }
+
+    #[test]
+    fn move_actor_absolute_round_trips() {
+        let read = round_trip(&CMoveActorAbsolute {
+            actor_runtime_id: VarULong(31),
+            header: CMoveActorAbsolute::FLAG_ON_GROUND | CMoveActorAbsolute::FLAG_TELEPORT,
+            position: Vector3::new(-100.25, 12.5, 7.0),
+            rotation_x: 10,
+            rotation_y: 200,
+            rotation_y_head: 201,
+        });
+        assert_eq!(read.actor_runtime_id, VarULong(31));
+        assert_eq!(read.header, 0x03);
+        assert_eq!(read.position, Vector3::new(-100.25, 12.5, 7.0));
+        assert_eq!(
+            (read.rotation_x, read.rotation_y, read.rotation_y_head),
+            (10, 200, 201)
+        );
+    }
+
+    #[test]
+    fn take_item_actor_round_trips() {
+        let read = round_trip(&CTakeItemActor {
+            item_runtime_id: VarULong(9),
+            actor_runtime_id: VarULong(1),
+        });
+        assert_eq!(read.item_runtime_id, VarULong(9));
+        assert_eq!(read.actor_runtime_id, VarULong(1));
+    }
+
+    #[test]
+    fn set_actor_data_round_trips() {
+        let read = round_trip(&CSetActorData {
+            target_runtime_id: VarULong(42),
+            actor_data: one_entry_data(26, MetadataValue::Byte(-2)),
+            synced_properties: one_entry_properties(),
+            tick: VarULong(600),
+        });
+        assert_eq!(read.target_runtime_id, VarULong(42));
+        assert!(matches!(read.actor_data.0[&26], MetadataValue::Byte(-2)));
+        assert_eq!(read.synced_properties.float_entries_list[&5], 1.5);
+        assert_eq!(read.tick, VarULong(600));
     }
 }

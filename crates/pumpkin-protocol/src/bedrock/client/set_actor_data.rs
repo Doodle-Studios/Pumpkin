@@ -2,6 +2,8 @@
 
 use std::{collections::HashMap, io::Write};
 
+#[cfg(feature = "client")]
+use crate::serial::PacketRead;
 use crate::{
     codec::{var_int::VarInt, var_long::VarLong, var_uint::VarUInt, var_ulong::VarULong},
     serial::PacketWrite,
@@ -12,6 +14,7 @@ use std::io::Error;
 
 /// Sent by the server to update metadata and Molang properties of an entity (e.g. name tags, fire, scale).
 #[derive(PacketWrite)]
+#[cfg_attr(feature = "client", derive(PacketRead))]
 #[packet(39)]
 pub struct CSetActorData {
     /// The unique runtime ID of the entity being updated

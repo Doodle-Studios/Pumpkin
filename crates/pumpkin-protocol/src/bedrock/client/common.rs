@@ -6,6 +6,7 @@ use crate::{codec::var_long::VarLong, serial::PacketWrite};
 
 /// Operating system or client platform identifier reported by the client.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PacketWrite)]
+#[cfg_attr(feature = "client", derive(PacketRead))]
 #[repr(i32)]
 pub enum BuildPlatform {
     Unknown = -1,
@@ -124,6 +125,7 @@ pub struct SerializedAbilitiesDataSerializedLayer {
 
 /// Describes an attachment link between two entities, such as a player riding a vehicle.
 #[derive(Default, Clone, PacketWrite)]
+#[cfg_attr(feature = "client", derive(PacketRead))]
 pub struct ActorLink {
     /// Unique entity ID of the vehicle / entity being ridden.
     pub ridden_unique_id: VarLong,

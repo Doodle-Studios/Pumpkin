@@ -1,3 +1,5 @@
+#[cfg(feature = "client")]
+use crate::serial::PacketRead;
 use crate::{
     bedrock::{client::GameType, network_item::NetworkItemStackDescriptor},
     codec::var_ulong::VarULong,
@@ -15,6 +17,7 @@ use super::{
 
 /// Sent by the server to spawn another player client-side into the world.
 #[derive(PacketWrite)]
+#[cfg_attr(feature = "client", derive(PacketRead))]
 #[packet(12)]
 pub struct CAddPlayer {
     /// UUID of the player being spawned.

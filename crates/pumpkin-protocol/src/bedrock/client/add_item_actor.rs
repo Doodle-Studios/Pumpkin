@@ -1,5 +1,7 @@
 // TODO: update inventory
 
+#[cfg(feature = "client")]
+use crate::serial::PacketRead;
 use crate::{
     bedrock::network_item::ItemStackWrapper,
     codec::{var_long::VarLong, var_ulong::VarULong},
@@ -12,6 +14,7 @@ use super::set_actor_data::SyncedActorDataList;
 
 /// Sent by the server to spawn a dropped item entity in the world.
 #[derive(PacketWrite)]
+#[cfg_attr(feature = "client", derive(PacketRead))]
 #[packet(15)]
 pub struct CAddItemActor {
     /// Persistent unique entity ID of the dropped item entity.

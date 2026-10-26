@@ -4,6 +4,8 @@ use pumpkin_macros::packet;
 use pumpkin_util::math::{position::BlockPos, vector2::Vector2, vector3::Vector3};
 
 use super::player_action::PlayerActionType;
+#[cfg(feature = "client")]
+use crate::serial::PacketWrite;
 use crate::{
     codec::{
         bitset::Bitset, var_int::VarInt, var_long::VarLong, var_uint::VarUInt, var_ulong::VarULong,
@@ -254,6 +256,7 @@ impl PacketRead for PlayerUseItemTransactionData {
 
 /// A block action (e.g. start/stop breaking) executed within a player input tick.
 #[derive(Debug, PacketRead)]
+#[cfg_attr(feature = "client", derive(PacketWrite))]
 pub struct PlayerBlockAction {
     /// Action category performed on the block.
     pub action: PlayerActionType,

@@ -4,6 +4,8 @@ use pumpkin_macros::packet;
 use pumpkin_util::math::position::BlockPos;
 
 use crate::bedrock::network_item::NetworkItemDescriptor;
+#[cfg(feature = "client")]
+use crate::serial::PacketWrite;
 use crate::{
     codec::{var_int::VarInt, var_uint::VarUInt, var_ulong::VarULong},
     serial::PacketRead,
@@ -120,12 +122,15 @@ impl PacketRead for InventoryAction {
 }
 
 #[derive(Debug, PacketRead)]
+#[cfg_attr(feature = "client", derive(PacketWrite))]
 pub struct NormalTransactionData;
 
 #[derive(Debug, PacketRead)]
+#[cfg_attr(feature = "client", derive(PacketWrite))]
 pub struct MismatchTransactionData;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PacketRead)]
+#[cfg_attr(feature = "client", derive(PacketWrite))]
 #[repr(u8)]
 pub enum HandSlot {
     Mainhand,
@@ -133,6 +138,7 @@ pub enum HandSlot {
 }
 
 #[derive(Debug, PacketRead)]
+#[cfg_attr(feature = "client", derive(PacketWrite))]
 pub struct UseItemTransactionData {
     pub action_type: VarInt,
     pub trigger_type: u8,
@@ -149,6 +155,7 @@ pub struct UseItemTransactionData {
 }
 
 #[derive(Debug, PacketRead)]
+#[cfg_attr(feature = "client", derive(PacketWrite))]
 pub struct UseItemOnEntityTransactionData {
     pub target_entity_runtime_id: VarULong,
     pub action_type: VarInt,
@@ -159,6 +166,7 @@ pub struct UseItemOnEntityTransactionData {
 }
 
 #[derive(Debug, PacketRead)]
+#[cfg_attr(feature = "client", derive(PacketWrite))]
 pub struct ReleaseItemTransactionData {
     pub action_type: VarInt,
     pub hot_bar_slot: VarInt,

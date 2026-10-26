@@ -12,19 +12,18 @@ const INPUT_FLAGS: u8 = 66;
 /// Mirrors `PacketRead for SPlayerAuthInput`, field by field.
 ///
 /// The input flags go as a count, then each set flag's number, in ascending
-/// order like the official client.
+/// order like the official client. Block actions go as a `bool`, a `VarUInt`
+/// count and the actions.
 ///
-/// Item interactions, item stack requests and block actions are refused: their
-/// writers come with block breaking and placing.
+/// Item interactions and item stack requests are refused. The official client
+/// sends neither inside this packet (the M5 capture): it places with an
+/// `InventoryTransaction` and moves items with an `ItemStackRequest`.
 impl PacketWrite for SPlayerAuthInput {
     fn write<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
-        if self.item_interaction.is_some()
-            || self.item_stack_request.is_some()
-            || self.block_actions.is_some()
-        {
+        if self.item_interaction.is_some() || self.item_stack_request.is_some() {
             return Err(Error::new(
                 ErrorKind::Unsupported,
-                "PlayerAuthInput item and block actions can't be written yet",
+                "PlayerAuthInput item interactions and item stack requests can't be written",
             ));
         }
 
@@ -50,10 +49,17 @@ impl PacketWrite for SPlayerAuthInput {
         self.tick.write(writer)?;
         self.delta.write(writer)?;
 
-        // Item interaction, item stack request and block actions: all absent.
+        // Item interaction and item stack request: always absent.
         false.write(writer)?;
         false.write(writer)?;
-        false.write(writer)?;
+
+        self.block_actions.is_some().write(writer)?;
+        if let Some(actions) = &self.block_actions {
+            VarUInt(actions.len() as u32).write(writer)?;
+            for action in actions {
+                action.write(writer)?;
+            }
+        }
 
         self.vehicle_rotation.write(writer)?;
         self.vehicle_unique_id.write(writer)?;
@@ -66,7 +72,10 @@ impl PacketWrite for SPlayerAuthInput {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::serial::PacketRead;
+    use crate::{
+        bedrock::server::{item_stack_request::ItemStackRequest, player_action::PlayerActionType},
+        serial::PacketRead,
+    };
 
     /// Reads a capture with Pumpkin's reader, then writes it back with ours.
     fn golden(fixture: &[u8]) -> SPlayerAuthInput {
@@ -107,12 +116,84 @@ mod tests {
         assert_eq!(set_flags(&packet), [3, 6, 16, 31, 48, 60, 61]);
     }
 
+    /// The block actions a packet carries, as (action, x, y, z, face).
+    fn block_actions(packet: &SPlayerAuthInput) -> Vec<(PlayerActionType, i32, i32, i32, i32)> {
+        packet
+            .block_actions
+            .iter()
+            .flatten()
+            .map(|action| {
+                let at = action.block_pos.0;
+                (action.action, at.x, at.y, at.z, action.face.0)
+            })
+            .collect()
+    }
+
     #[test]
-    fn block_actions_are_refused() {
+    fn starting_to_break_matches_the_official_client() {
+        let packet = golden(include_bytes!(
+            "fixtures/player_auth_input-start_destroy.bin"
+        ));
+        assert!(set_flags(&packet).contains(&35)); // PerformBlockActions
+        let actions = block_actions(&packet);
+        assert_eq!(actions.len(), 1);
+        assert!(matches!(
+            actions[0],
+            (PlayerActionType::StartDestroyBlock, 0, 200, 29, 4)
+        ));
+    }
+
+    #[test]
+    fn a_predicted_break_matches_the_official_client() {
+        let packet = golden(include_bytes!(
+            "fixtures/player_auth_input-predict_destroy.bin"
+        ));
+        let actions = block_actions(&packet);
+        assert!(matches!(
+            actions[..],
+            [
+                (PlayerActionType::ContinueDestroyBlock, 0, 200, 29, 4),
+                (PlayerActionType::PredictDestroyBlock, 0, 200, 29, 4),
+            ]
+        ));
+    }
+
+    #[test]
+    fn letting_go_matches_the_official_client() {
+        let packet = golden(include_bytes!(
+            "fixtures/player_auth_input-abort_destroy.bin"
+        ));
+        assert!(matches!(
+            block_actions(&packet)[..],
+            [(PlayerActionType::AbortDestroyBlock, 0, 199, 30, 0)]
+        ));
+    }
+
+    #[test]
+    fn a_creative_break_matches_the_official_client() {
+        let packet = golden(include_bytes!(
+            "fixtures/player_auth_input-creative_destroy.bin"
+        ));
+        assert!(matches!(
+            block_actions(&packet)[..],
+            [
+                (PlayerActionType::StartDestroyBlock, -4, 199, 30, 1),
+                (PlayerActionType::PredictDestroyBlock, -4, 199, 30, 1),
+            ]
+        ));
+    }
+
+    #[test]
+    fn item_interactions_are_refused() {
         let mut packet =
             SPlayerAuthInput::read(&mut &include_bytes!("fixtures/player_auth_input-idle.bin")[..])
                 .unwrap();
-        packet.block_actions = Some(Vec::new());
+        packet.item_stack_request = Some(ItemStackRequest {
+            request_id: VarInt(-1),
+            actions: Vec::new(),
+            filter_strings: Vec::new(),
+            filter_cause: -1,
+        });
         let error = packet.write(&mut Vec::new()).unwrap_err();
         assert_eq!(error.kind(), ErrorKind::Unsupported);
     }

@@ -3,6 +3,8 @@
 use pumpkin_macros::packet;
 use pumpkin_util::math::position::BlockPos;
 
+#[cfg(feature = "client")]
+use crate::serial::PacketWrite;
 use crate::{
     codec::{var_int::VarInt, var_ulong::VarULong},
     serial::PacketRead,
@@ -10,6 +12,7 @@ use crate::{
 
 /// Sent by the client when performing player actions such as mining, sprinting, sneaking, or dimensions changes.
 #[derive(Debug, PacketRead)]
+#[cfg_attr(feature = "client", derive(PacketWrite))]
 #[packet(36)]
 pub struct SPlayerAction {
     /// Runtime entity ID of the executing player.
@@ -26,6 +29,7 @@ pub struct SPlayerAction {
 
 /// Category of action performed by a player.
 #[derive(Clone, Copy, Debug, PacketRead)]
+#[cfg_attr(feature = "client", derive(PacketWrite))]
 #[repr(i32)]
 #[serial(varint)]
 pub enum PlayerActionType {

@@ -15,11 +15,15 @@
 //! official Bedrock client sent (`fixtures/`), and read packets by a round
 //! trip through Pumpkin's own writer.
 
+#[cfg(test)]
+mod actions;
 mod actor_data;
 pub mod creative_content;
 mod disconnect;
 mod gamerules_changed;
+mod inventory_transaction;
 mod item_registry;
+mod item_stack_request;
 mod item_stack_response;
 mod login;
 mod move_actor_delta;

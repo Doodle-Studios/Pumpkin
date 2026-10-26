@@ -4,9 +4,12 @@ use pumpkin_macros::packet;
 use pumpkin_util::math::position::BlockPos;
 
 use crate::serial::PacketRead;
+#[cfg(feature = "client")]
+use crate::serial::PacketWrite;
 
 /// Sent by the client when picking a targeted block (middle-click / pick block action).
 #[derive(Debug, PacketRead)]
+#[cfg_attr(feature = "client", derive(PacketWrite))]
 #[packet(34)]
 pub struct SBlockPickRequest {
     /// World position coordinates of the targeted block.

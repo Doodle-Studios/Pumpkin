@@ -3,10 +3,13 @@
 use pumpkin_macros::packet;
 use pumpkin_util::math::vector3::Vector3;
 
+#[cfg(feature = "client")]
+use crate::serial::PacketWrite;
 use crate::{codec::var_ulong::VarULong, serial::PacketRead};
 
 /// Sent by the client when interacting with an entity (mounting, NPC dialogue, opening inventory).
 #[derive(Debug, PacketRead)]
+#[cfg_attr(feature = "client", derive(PacketWrite))]
 #[packet(33)]
 pub struct SInteract {
     /// Type of interaction performed.
@@ -19,6 +22,7 @@ pub struct SInteract {
 
 /// Action type performed in an entity interaction.
 #[derive(Debug, PacketRead)]
+#[cfg_attr(feature = "client", derive(Clone, Copy, PacketWrite))]
 #[repr(u8)]
 pub enum Action {
     Invalid = 0,

@@ -4,10 +4,13 @@ use pumpkin_macros::packet;
 use std::borrow::Cow;
 use uuid::Uuid;
 
+#[cfg(feature = "client")]
+use crate::serial::PacketWrite;
 use crate::serial::{PacketRead, PacketReadSlice};
 
 /// Sent by the client to request server-side execution of a slash command.
 #[derive(Debug, PacketRead, PacketReadSlice)]
+#[cfg_attr(feature = "client", derive(PacketWrite))]
 #[packet(77)]
 pub struct SCommandRequest<'a> {
     /// Raw command line string (with leading slash).
@@ -24,6 +27,7 @@ pub struct SCommandRequest<'a> {
 
 /// Metadata describing the origin and sender of an executed command.
 #[derive(Debug, PacketRead, PacketReadSlice)]
+#[cfg_attr(feature = "client", derive(PacketWrite))]
 pub struct CommandOriginData<'a> {
     /// Origin type string (e.g. `player`, `command_block`, `server`).
     pub r#type: Cow<'a, str>,

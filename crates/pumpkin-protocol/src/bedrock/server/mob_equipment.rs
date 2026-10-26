@@ -1,5 +1,7 @@
 // Last verified for v2169
 
+#[cfg(feature = "client")]
+use crate::serial::PacketWrite;
 use crate::{
     bedrock::network_item::NetworkItemStackDescriptor, codec::var_ulong::VarULong,
     serial::PacketRead,
@@ -8,6 +10,7 @@ use pumpkin_macros::packet;
 
 /// Sent by the client to update the item held or equipped in a mob or player slot.
 #[derive(Debug, PacketRead)]
+#[cfg_attr(feature = "client", derive(PacketWrite))]
 #[packet(31)]
 pub struct SMobEquipment {
     /// Runtime entity ID of the mob or player changing equipment.

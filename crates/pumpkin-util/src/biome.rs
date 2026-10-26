@@ -105,6 +105,11 @@ impl Weather {
         self.temperature
     }
 
+    #[must_use]
+    pub const fn has_precipitation(&self) -> bool {
+        self.has_precipitation
+    }
+
     /// Returns the biome's downfall, from 0 (dry) to 1 (wet).
     ///
     /// Limonite: clients colour grass and leaves by it. Both Java and Bedrock

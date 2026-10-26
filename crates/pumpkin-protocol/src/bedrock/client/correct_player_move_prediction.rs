@@ -3,10 +3,13 @@
 use pumpkin_macros::packet;
 use pumpkin_util::math::{vector2::Vector2, vector3::Vector3};
 
+#[cfg(feature = "client")]
+use crate::serial::PacketRead;
 use crate::{codec::var_ulong::VarULong, serial::PacketWrite};
 
 /// Sent by the server to correct the client's predicted movement under server authoritative movement.
 #[derive(PacketWrite)]
+#[cfg_attr(feature = "client", derive(PacketRead))]
 #[packet(161)]
 pub struct CCorrectPlayerMovePrediction {
     /// Prediction mode type (e.g. player movement vs vehicle movement).

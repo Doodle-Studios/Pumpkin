@@ -3,10 +3,13 @@
 use pumpkin_macros::packet;
 use pumpkin_util::math::vector3::Vector3;
 
+#[cfg(feature = "client")]
+use crate::serial::PacketRead;
 use crate::{codec::var_ulong::VarULong, serial::PacketWrite};
 
 /// Sent by the server to set the movement velocity of an entity (e.g. knockback or explosion velocity).
 #[derive(PacketWrite)]
+#[cfg_attr(feature = "client", derive(PacketRead))]
 #[packet(40)]
 pub struct CSetActorMotion {
     /// Runtime entity ID of the target actor.

@@ -2,10 +2,13 @@
 
 use pumpkin_macros::packet;
 
+#[cfg(feature = "client")]
+use crate::serial::PacketRead;
 use crate::{codec::var_int::VarInt, serial::PacketWrite};
 
 /// Sent by the server to synchronize the day-night cycle time (in ticks) with the client.
 #[derive(PacketWrite)]
+#[cfg_attr(feature = "client", derive(PacketRead))]
 #[packet(10)]
 pub struct CSetTime {
     /// In-game time of day in ticks.

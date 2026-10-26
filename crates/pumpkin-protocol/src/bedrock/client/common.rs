@@ -53,6 +53,7 @@ impl From<GameMode> for GameType {
 
 /// Serialized abilities data containing permissions and ability bitmasks for a player.
 #[derive(Clone, PacketWrite)]
+#[cfg_attr(feature = "client", derive(PacketRead))]
 pub struct SerializedAbilitiesData {
     /// Unique entity ID of the target player.
     pub target_player_raw_id: i64,
@@ -66,6 +67,7 @@ pub struct SerializedAbilitiesData {
 
 /// Player permission level representing their world access rights.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PacketWrite)]
+#[cfg_attr(feature = "client", derive(PacketRead))]
 #[repr(i8)]
 pub enum PlayerPermissionLevel {
     Visitor = 0,
@@ -76,6 +78,7 @@ pub enum PlayerPermissionLevel {
 
 /// Command permission level determining allowed command execution scope.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PacketWrite)]
+#[cfg_attr(feature = "client", derive(PacketRead))]
 #[repr(u8)]
 pub enum CommandPermissionLevel {
     Any = 0,
@@ -103,6 +106,7 @@ impl ToString for CommandPermissionLevel {
 
 /// A single ability layer defining movement speeds and allowed action bitflags.
 #[derive(Default, Clone, PacketWrite)]
+#[cfg_attr(feature = "client", derive(PacketRead))]
 pub struct SerializedAbilitiesDataSerializedLayer {
     /// Layer type index (such as base, spectator, or creative).
     pub serialized_layer: u16,
